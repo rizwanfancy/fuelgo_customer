@@ -29,7 +29,7 @@ import retrofit2.http.Path
  */
 interface ApiService {
 
-    // ── Auth ────────────────────────────────────────────────────────────
+    // --- Auth ---------------------------------------------------------
     @POST("Auth/login")
     suspend fun login(@Body body: LoginRequest): Response<AuthResponseDto>
 
@@ -39,7 +39,7 @@ interface ApiService {
     @POST("Auth/change-password")
     suspend fun changePassword(@Body body: ChangePasswordRequest): Response<ApiMessageDto>
 
-    // ── Customers ───────────────────────────────────────────────────────
+    // --- Customers ------------------------------------------------------
     @POST("customers/register")
     suspend fun registerCustomer(@Body body: RegisterCustomerRequest): Response<RegisterCustomerResponseDto>
 
@@ -52,7 +52,7 @@ interface ApiService {
     @POST("customers/me/addresses")
     suspend fun addMyAddress(@Body body: AddAddressRequest): Response<CustomerAddressDto>
 
-    // ── Orders ──────────────────────────────────────────────────────────
+    // --- Orders -----------------------------------------------------------
     @GET("orders/fuel-types")
     suspend fun getFuelTypes(): Response<List<FuelTypeDto>>
 
