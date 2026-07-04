@@ -1,0 +1,70 @@
+name: Build signed release APK
+
+# Builds a SIGNED, RELEASE (not debug) APK automatically on every push, and lets
+# you trigger it manually from the Actions tab ("Run workflow") too. On a version
+# tag push (v*), it also publishes the APK as a GitHub Release.
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # GitHub-hosted Ubuntu runners already include the Android SDK/build-tools.
+      # This project ships without a Gradle wrapper jar, so we let this action
+      # provision Gradle itself instead of relying on ./gradlew.
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      # Decode the release keystore from a repo secret into a file on the runner.
+      # The raw .keystore file is never committed to git — see KEYSTORE-INFO.txt
+      # for how to create this secret from fuelgo-release.keystore.base64.txt.
+      - name: Decode release keystore
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$RELEASE_KEYSTORE_BASE64" ]; then
+            echo "::error::RELEASE_KEYSTORE_BASE64 secret is not set. Add the four" \
+                 "RELEASE_KEYSTORE_* secrets described in KEYSTORE-INFO.txt before" \
+                 "pushing, otherwise the signed release build cannot run."
+            exit 1
+          fi
+          echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/fuelgo-release.keystore"
+
+      - name: Build signed release APK
+        env:
+          RELEASE_KEYSTORE_PATH: ${{ runner.temp }}/fuelgo-release.keystore
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: gradle assembleRelease --no-daemon
+
+      - name: Upload signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuelgo-customer-release-apk
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+      # Only runs when you push a tag like "v1.0.0" — attaches the signed APK to
+      # a GitHub Release so you (and testers) have a stable download link.
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/build/outputs/apk/release/*.apk
+          generate_release_notes: true
