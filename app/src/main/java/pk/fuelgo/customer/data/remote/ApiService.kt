@@ -22,11 +22,10 @@ import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Path
 
-/**
- * Endpoint surface used by the customer app, matching Backend/FuelGo.Api/Controllers/*.cs.
- * The tenant "slug" header and Authorization bearer token are attached by NetworkModule's
- * interceptors, so none of these calls need to pass them explicitly.
- */
+// Endpoint surface used by the customer app, matching the controllers under
+// Backend/FuelGo.Api/Controllers. The tenant "slug" header and Authorization
+// bearer token are attached by NetworkModule's interceptors, so none of these
+// calls need to pass them explicitly.
 interface ApiService {
 
     // --- Auth ---------------------------------------------------------
