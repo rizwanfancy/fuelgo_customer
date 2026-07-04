@@ -44,6 +44,13 @@ class DynamicBaseUrlInterceptor(private val apiConfigManager: ApiConfigManager) 
             ?: throw IOException("The saved FuelGo server address (\"$configuredBaseUrl\") isn't a valid URL. Fix it under API Configuration.")
 
         val newRequest = original.newBuilder().url(newHttpUrl).build()
-        return chain.proceed(newRequest)
+        return try {
+            chain.proceed(newRequest)
+        } catch (e: IOException) {
+            // Re-throw with the exact address we attempted baked into the message, so the
+            // on-screen error tells you precisely what the app tried to reach — no need for
+            // logcat/adb to see it.
+            throw IOException("Could not reach $newHttpUrl — ${e.message}", e)
+        }
     }
 }
