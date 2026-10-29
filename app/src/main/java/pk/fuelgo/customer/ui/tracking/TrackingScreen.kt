@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import pk.fuelgo.customer.data.remote.dto.OrderDto
 import pk.fuelgo.customer.ui.components.CancelOrderDialog
+import pk.fuelgo.customer.ui.dashboard.etaTime
 import pk.fuelgo.customer.ui.components.EmptyState
 import pk.fuelgo.customer.ui.components.RefreshBox
 import pk.fuelgo.customer.ui.components.ErrorBanner

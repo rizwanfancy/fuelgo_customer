@@ -4,6 +4,7 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
+import android.location.Location
 import android.location.LocationManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -33,6 +34,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
+import androidx.core.util.Consumer
 import pk.fuelgo.customer.ui.components.FuelGoOutlinedButton
 import pk.fuelgo.customer.ui.components.PillChip
 import pk.fuelgo.customer.ui.components.SectionCard
@@ -157,7 +159,7 @@ private fun fetchLocation(context: Context, onLocation: (Double, Double) -> Unit
         onError("Turn on location services and try again.")
         return
     }
-    LocationManagerCompat.getCurrentLocation(manager, provider, null, ContextCompat.getMainExecutor(context)) { location ->
+    LocationManagerCompat.getCurrentLocation(manager, provider, null, ContextCompat.getMainExecutor(context), Consumer<Location?> { location ->
         if (location != null) onLocation(location.latitude, location.longitude) else onError("Couldn't get your location. Try again outdoors.")
-    }
+    })
 }
