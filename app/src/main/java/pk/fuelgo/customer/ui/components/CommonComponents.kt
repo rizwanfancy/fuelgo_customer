@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -190,7 +191,7 @@ fun LoadingState(message: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun ErrorBanner(message: String, modifier: Modifier = Modifier) {
+fun ErrorBanner(message: String, modifier: Modifier = Modifier, onRetry: (() -> Unit)? = null) {
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -200,8 +201,58 @@ fun ErrorBanner(message: String, modifier: Modifier = Modifier) {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Icon(Icons.Filled.ErrorOutline, contentDescription = null, tint = StatusDanger)
-        Text(message, color = StatusDanger, fontSize = MaterialTheme.typography.bodySmall.fontSize)
+        Text(message, color = StatusDanger, fontSize = MaterialTheme.typography.bodySmall.fontSize, modifier = Modifier.weight(1f))
+        if (onRetry != null) {
+            androidx.compose.material3.TextButton(onClick = onRetry) { Text("Retry", color = StatusDanger, fontWeight = FontWeight.Bold) }
+        }
     }
+}
+
+/**
+ * Standard pull-to-refresh wrapper. [content] must be scrollable (or fill the box inside a
+ * verticalScroll) so the pull gesture is detected, even for loading/empty states.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun RefreshBox(
+    isRefreshing: Boolean,
+    onRefresh: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = onRefresh,
+        modifier = modifier.fillMaxSize(),
+        content = { content() },
+    )
+}
+
+/** Re-runs [onResume] each time the screen returns to the foreground / tab is re-selected. */
+@Composable
+fun RefreshOnResume(onResume: () -> Unit) {
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) { onResume() }
+}
+
+@Composable
+fun CancelOrderDialog(orderNumber: String, onDismiss: () -> Unit, onConfirm: (reason: String) -> Unit) {
+    var reason by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Cancel order $orderNumber?") },
+        text = {
+            androidx.compose.material3.OutlinedTextField(
+                value = reason,
+                onValueChange = { reason = it },
+                label = { Text("Reason (optional)") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = { onConfirm(reason.trim().ifBlank { "Cancelled by customer" }) }) { Text("Yes, cancel") }
+        },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Keep order") } },
+    )
 }
 
 @Composable

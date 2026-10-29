@@ -49,6 +49,8 @@ data class OrderDto(
     val createdAt: String? = null,
     val driverName: String? = null,
     val cancellationReason: String? = null,
+    // Only populated by the backend for the owning customer's own active orders.
+    val deliveryOtp: String? = null,
     // Not returned by the current backend OrderDto — kept optional for forward-compatibility.
     val customerRating: Int? = null,
 )

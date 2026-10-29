@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import pk.fuelgo.customer.data.remote.ApiResult
+import pk.fuelgo.customer.data.remote.dto.FuelTypeDto
 import pk.fuelgo.customer.data.remote.dto.OrderDto
 import pk.fuelgo.customer.data.repository.CustomerRepository
 import pk.fuelgo.customer.data.repository.OrderRepository
@@ -23,6 +24,8 @@ private val INACTIVE_STATUSES = setOf("Delivered", "Cancelled", "Failed")
 
 data class DashboardUiState(
     val isLoading: Boolean = true,
+    val isRefreshing: Boolean = false,
+    val fuelRates: List<FuelTypeDto> = emptyList(),
     val greetingName: String = "there",
     val totalOrders: Int = 0,
     val totalSpentPkr: Double = 0.0,
@@ -46,12 +49,20 @@ class DashboardViewModel(
         load()
     }
 
-    fun load() {
+    /** Silent reload for pull-to-refresh / tab resume. No-op while a load is already running. */
+    fun refresh() {
+        val s = _uiState.value
+        if (s.isLoading || s.isRefreshing) return
+        load(silent = true)
+    }
+
+    fun load(silent: Boolean = false) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            _uiState.update { it.copy(isLoading = !silent, isRefreshing = silent, errorMessage = null) }
 
             val ordersResult = orderRepository.getMyOrders()
             val profileResult = customerRepository.getProfile()
+            val fuelResult = orderRepository.getFuelTypes()
 
             val orders = (ordersResult as? ApiResult.Success)?.data ?: emptyList()
             val greetingName = (profileResult as? ApiResult.Success)?.data?.firstName?.takeIf { it.isNotBlank() } ?: "there"
@@ -68,6 +79,8 @@ class DashboardViewModel(
             _uiState.update {
                 it.copy(
                     isLoading = false,
+                    isRefreshing = false,
+                    fuelRates = (fuelResult as? ApiResult.Success)?.data ?: it.fuelRates,
                     greetingName = greetingName,
                     totalOrders = orders.size,
                     totalSpentPkr = delivered.sumOf { o -> o.totalAmount },

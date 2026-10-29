@@ -12,4 +12,5 @@ object Routes {
     const val TRACKING = "tracking"
     const val HISTORY = "history"
     const val PROFILE = "profile"
+    const val NOTIFICATIONS = "notifications"
 }

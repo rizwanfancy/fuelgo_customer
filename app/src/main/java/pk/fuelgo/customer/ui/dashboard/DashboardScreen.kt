@@ -30,6 +30,9 @@ import pk.fuelgo.customer.ui.components.ErrorBanner
 import pk.fuelgo.customer.ui.components.FuelGoPrimaryButton
 import pk.fuelgo.customer.ui.components.HorizontalBarChart
 import pk.fuelgo.customer.ui.components.LoadingState
+import pk.fuelgo.customer.ui.components.RefreshBox
+import pk.fuelgo.customer.ui.components.RefreshOnResume
+import pk.fuelgo.customer.ui.theme.fuelColorForCode
 import pk.fuelgo.customer.ui.components.SectionCard
 import pk.fuelgo.customer.ui.components.VerticalBarChart
 import pk.fuelgo.customer.ui.fuelGoViewModel
@@ -47,11 +50,9 @@ fun DashboardScreen(onGoToOrder: () -> Unit, onGoToTracking: () -> Unit) {
     val viewModel = fuelGoViewModel { DashboardViewModel(it.orderRepository, it.customerRepository) }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
-    if (state.isLoading) {
-        LoadingState("Loading your dashboard…", modifier = Modifier.fillMaxSize())
-        return
-    }
+    RefreshOnResume(viewModel::refresh)
 
+    RefreshBox(isRefreshing = state.isRefreshing, onRefresh = viewModel::refresh) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -59,6 +60,10 @@ fun DashboardScreen(onGoToOrder: () -> Unit, onGoToTracking: () -> Unit) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
+        if (state.isLoading) {
+            LoadingState("Loading your dashboard…")
+            return@Column
+        }
         Text("Hi ${state.greetingName},", style = MaterialTheme.typography.headlineMedium)
         Text(
             "Here's a snapshot of your FuelGo activity.",
@@ -66,7 +71,7 @@ fun DashboardScreen(onGoToOrder: () -> Unit, onGoToTracking: () -> Unit) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        state.errorMessage?.let { ErrorBanner(it) }
+        state.errorMessage?.let { ErrorBanner(it, onRetry = { viewModel.load() }) }
 
         state.activeOrder?.let { order ->
             SectionCard {
@@ -76,7 +81,8 @@ fun DashboardScreen(onGoToOrder: () -> Unit, onGoToTracking: () -> Unit) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Active delivery — ${order.orderNumber}", fontWeight = FontWeight.Bold)
                         Text(
-                            "${order.fuelTypeName} · ${order.status}",
+                            "${order.fuelTypeName} · ${order.status}" +
+                                (order.eta?.let { " · ETA ${etaTime(it)}" } ?: ""),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -87,6 +93,22 @@ fun DashboardScreen(onGoToOrder: () -> Unit, onGoToTracking: () -> Unit) {
         }
 
         StatsGrid(state)
+
+        if (state.fuelRates.isNotEmpty()) {
+            SectionCard {
+                Text("Today's fuel rates", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 4.dp))
+                Text("Current price per unit", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 12.dp))
+                state.fuelRates.forEach { fuel ->
+                    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column {
+                            Text(fuel.name, fontWeight = FontWeight.Bold)
+                            Text(fuel.code, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Text("PKR ${"%.2f".format(fuel.pricePerLitre)} / ${fuel.unitTypeSymbol ?: "L"}", fontWeight = FontWeight.Bold, color = fuelColorForCode(fuel.code))
+                    }
+                }
+            }
+        }
 
         SectionCard {
             Text("Orders by status", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 14.dp))
@@ -107,6 +129,7 @@ fun DashboardScreen(onGoToOrder: () -> Unit, onGoToTracking: () -> Unit) {
             onClick = onGoToOrder,
             modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
         )
+    }
     }
 }
 
@@ -141,3 +164,10 @@ private fun StatTile(label: String, value: String, accent: Color, modifier: Modi
         Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
+
+internal fun etaTime(raw: String): String = runCatching {
+    java.time.OffsetDateTime.parse(raw).atZoneSameInstant(java.time.ZoneId.systemDefault())
+        .format(java.time.format.DateTimeFormatter.ofPattern("hh:mm a"))
+}.recoverCatching {
+    java.time.LocalDateTime.parse(raw).format(java.time.format.DateTimeFormatter.ofPattern("hh:mm a"))
+}.getOrDefault(raw.take(16))

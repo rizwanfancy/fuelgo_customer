@@ -10,6 +10,9 @@ import kotlinx.coroutines.launch
 import pk.fuelgo.customer.data.remote.ApiResult
 import pk.fuelgo.customer.data.remote.dto.OrderDto
 import pk.fuelgo.customer.data.repository.OrderRepository
+import java.time.LocalDate
+import java.time.OffsetDateTime
+import java.time.ZoneId
 
 val ORDER_STATUS_FILTERS = listOf("All", "Pending", "Assigned", "EnRoute", "Arrived", "Delivered", "Cancelled")
 
@@ -22,6 +25,11 @@ data class HistoryStats(
 
 data class HistoryUiState(
     val isLoading: Boolean = true,
+    val isRefreshing: Boolean = false,
+    val fuelFilter: String = "All",
+    val dateFrom: LocalDate? = null,
+    val dateTo: LocalDate? = null,
+    val cancelTarget: OrderDto? = null,
     val orders: List<OrderDto> = emptyList(),
     val searchQuery: String = "",
     val statusFilter: String = "All",
@@ -42,9 +50,19 @@ data class HistoryUiState(
                 val searchOk = q.isBlank() ||
                     listOf(order.orderNumber, order.fuelTypeName, order.deliveryAddress, order.deliveryCity, order.paymentMethod)
                         .joinToString(" ").lowercase().contains(q)
-                statusOk && searchOk
+                val fuelOk = fuelFilter == "All" || order.fuelTypeName == fuelFilter
+                val day = orderDate(order)
+                val dateOk = (dateFrom == null || (day != null && !day.isBefore(dateFrom))) &&
+                    (dateTo == null || (day != null && !day.isAfter(dateTo)))
+                statusOk && searchOk && fuelOk && dateOk
             }
         }
+
+    val fuelOptions: List<String>
+        get() = listOf("All") + orders.map { it.fuelTypeName }.filter { it.isNotBlank() }.distinct().sorted()
+
+    val hasActiveFilters: Boolean
+        get() = searchQuery.isNotBlank() || statusFilter != "All" || fuelFilter != "All" || dateFrom != null || dateTo != null
 
     val stats: HistoryStats
         get() = HistoryStats(
@@ -64,18 +82,31 @@ class HistoryViewModel(private val orderRepository: OrderRepository) : ViewModel
         load()
     }
 
-    fun load() {
+    fun refresh() {
+        val s = _uiState.value
+        if (s.isLoading || s.isRefreshing) return
+        load(silent = true)
+    }
+
+    fun load(silent: Boolean = false) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            _uiState.update { it.copy(isLoading = !silent, isRefreshing = silent, errorMessage = null) }
             when (val result = orderRepository.getMyOrders()) {
                 is ApiResult.Success -> {
                     val sorted = result.data.sortedByDescending { it.createdAt ?: "" }
-                    _uiState.update { it.copy(isLoading = false, orders = sorted) }
+                    _uiState.update { it.copy(isLoading = false, isRefreshing = false, orders = sorted) }
                 }
-                is ApiResult.Error -> _uiState.update { it.copy(isLoading = false, errorMessage = result.message) }
+                is ApiResult.Error -> _uiState.update { it.copy(isLoading = false, isRefreshing = false, errorMessage = result.message) }
             }
         }
     }
+
+    fun setFuelFilter(value: String) = _uiState.update { it.copy(fuelFilter = value) }
+    fun setDateRange(from: LocalDate?, to: LocalDate?) = _uiState.update { it.copy(dateFrom = from, dateTo = to) }
+    fun clearFilters() = _uiState.update {
+        it.copy(searchQuery = "", statusFilter = "All", fuelFilter = "All", dateFrom = null, dateTo = null)
+    }
+    fun askCancel(order: OrderDto?) = _uiState.update { it.copy(cancelTarget = order) }
 
     fun setSearchQuery(value: String) = _uiState.update { it.copy(searchQuery = value) }
     fun setStatusFilter(value: String) = _uiState.update { it.copy(statusFilter = value) }
@@ -110,10 +141,10 @@ class HistoryViewModel(private val orderRepository: OrderRepository) : ViewModel
         }
     }
 
-    fun cancelOrder(order: OrderDto) {
+    fun cancelOrder(order: OrderDto, reason: String) {
         viewModelScope.launch {
-            _uiState.update { it.copy(cancellingOrderId = order.id) }
-            when (val result = orderRepository.cancelOrder(order.id, "Cancelled by customer")) {
+            _uiState.update { it.copy(cancellingOrderId = order.id, cancelTarget = null) }
+            when (val result = orderRepository.cancelOrder(order.id, reason)) {
                 is ApiResult.Success -> {
                     _uiState.update { state ->
                         state.copy(
@@ -129,4 +160,11 @@ class HistoryViewModel(private val orderRepository: OrderRepository) : ViewModel
     }
 
     fun consumeActionMessage() = _uiState.update { it.copy(actionMessage = null) }
+}
+
+private fun orderDate(order: OrderDto): LocalDate? {
+    val raw = order.createdAt ?: return null
+    return runCatching { OffsetDateTime.parse(raw).atZoneSameInstant(ZoneId.systemDefault()).toLocalDate() }
+        .recoverCatching { LocalDate.parse(raw.take(10)) }
+        .getOrNull()
 }

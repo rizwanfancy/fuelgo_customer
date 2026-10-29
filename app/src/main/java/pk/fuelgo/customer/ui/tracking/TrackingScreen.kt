@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -38,9 +39,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import pk.fuelgo.customer.data.remote.dto.OrderDto
+import pk.fuelgo.customer.ui.components.CancelOrderDialog
 import pk.fuelgo.customer.ui.components.EmptyState
+import pk.fuelgo.customer.ui.components.RefreshBox
 import pk.fuelgo.customer.ui.components.ErrorBanner
 import pk.fuelgo.customer.ui.components.FuelGoOutlinedButton
 import pk.fuelgo.customer.ui.components.LoadingState
@@ -55,79 +59,99 @@ fun TrackingScreen(onGoToOrder: () -> Unit) {
     val viewModel = fuelGoViewModel { TrackingViewModel(it.orderRepository) }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    var showCancelConfirm by remember { mutableStateOf(false) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        val order = state.activeOrder
-        when {
-            state.isLoading -> LoadingState("Loading active order…")
-            order == null -> EmptyState(
-                title = "No active delivery",
-                message = "You don't have a fuel order in progress right now.",
-                actionLabel = "Place an order",
-                onAction = onGoToOrder,
-            )
-            else -> {
-                ActiveOrderCard(order = order)
-
-                StatusTimeline(order.status)
-
-                SectionCard {
-                    if (!order.driverName.isNullOrBlank()) {
-                        InfoRow(icon = Icons.Filled.Person, text = "Driver: ${order.driverName}")
-                    }
-                    InfoRow(icon = Icons.Filled.LocationOn, text = "${order.deliveryAddress}, ${order.deliveryCity}")
-                    Spacer(Modifier.height(8.dp))
-                    FuelGoOutlinedButton(
-                        text = "Open delivery location in Maps",
-                        onClick = { openInMaps(context, order) },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-
-                if (order.status == "Pending") {
-                    FuelGoOutlinedButton(
-                        text = if (state.isCancelling) "Cancelling…" else "Cancel this order",
-                        onClick = { showCancelConfirm = true },
-                        enabled = !state.isCancelling,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-
-                Text(
-                    "Auto-refreshes every 15 seconds.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+    RefreshBox(isRefreshing = state.isRefreshing, onRefresh = viewModel::refreshNow) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            val order = state.activeOrder
+            when {
+                state.isLoading -> LoadingState("Loading active order…")
+                order == null -> EmptyState(
+                    title = "No active delivery",
+                    message = "You don't have a fuel order in progress right now.",
+                    actionLabel = "Place an order",
+                    onAction = onGoToOrder,
                 )
-            }
-        }
+                else -> {
+                    ActiveOrderCard(order = order)
 
-        state.errorMessage?.let { ErrorBanner(it) }
-        state.actionMessage?.let {
-            Text(it, color = StatusSuccess, fontWeight = FontWeight.Bold)
+                    if (!order.deliveryOtp.isNullOrBlank()) {
+                        OtpCard(order.deliveryOtp)
+                    }
+
+                    StatusTimeline(order.status)
+
+                    SectionCard {
+                        if (!order.driverName.isNullOrBlank()) {
+                            InfoRow(icon = Icons.Filled.Person, text = "Driver: ${order.driverName}")
+                        }
+                        if (!order.eta.isNullOrBlank()) {
+                            InfoRow(icon = Icons.Filled.Schedule, text = "ETA: ${etaTime(order.eta)}")
+                        }
+                        InfoRow(icon = Icons.Filled.LocationOn, text = "${order.deliveryAddress}, ${order.deliveryCity}")
+                        Spacer(Modifier.height(8.dp))
+                        FuelGoOutlinedButton(
+                            text = "Open delivery location in Maps",
+                            onClick = { openInMaps(context, order) },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+
+                    if (order.status == "Pending") {
+                        FuelGoOutlinedButton(
+                            text = if (state.isCancelling) "Cancelling…" else "Cancel this order",
+                            onClick = { viewModel.setCancelDialog(true) },
+                            enabled = !state.isCancelling,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+
+                    Text(
+                        "Auto-refreshes every 15 seconds. Pull down to refresh now.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            state.errorMessage?.let { ErrorBanner(it, onRetry = viewModel::retry) }
+            state.actionMessage?.let {
+                Text(it, color = StatusSuccess, fontWeight = FontWeight.Bold)
+            }
         }
     }
 
-    if (showCancelConfirm) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showCancelConfirm = false },
-            title = { Text("Cancel order?") },
-            text = { Text("This will cancel your current fuel order.") },
-            confirmButton = {
-                androidx.compose.material3.TextButton(onClick = {
-                    showCancelConfirm = false
-                    viewModel.cancelActiveOrder()
-                }) { Text("Yes, cancel") }
-            },
-            dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { showCancelConfirm = false }) { Text("Keep order") }
-            },
+    val cancelOrder = state.activeOrder
+    if (state.showCancelDialog && cancelOrder != null) {
+        CancelOrderDialog(
+            orderNumber = cancelOrder.orderNumber,
+            onDismiss = { viewModel.setCancelDialog(false) },
+            onConfirm = viewModel::cancelActiveOrder,
+        )
+    }
+}
+
+@Composable
+private fun OtpCard(otp: String) {
+    SectionCard {
+        Text("Delivery OTP", style = MaterialTheme.typography.titleMedium)
+        Text(
+            otp,
+            style = MaterialTheme.typography.displaySmall,
+            fontWeight = FontWeight.ExtraBold,
+            color = FuelAction,
+            letterSpacing = 6.sp,
+            modifier = Modifier.padding(vertical = 6.dp),
+        )
+        Text(
+            "Give this code to the driver on arrival to confirm delivery.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

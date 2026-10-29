@@ -20,6 +20,9 @@ class OrderRepository(private val api: ApiService) {
         quantityLitres: Double,
         deliveryAddressId: String,
         paymentMethod: String,
+        scheduledAt: String? = null,
+        latitude: Double? = null,
+        longitude: Double? = null,
     ): ApiResult<OrderDto> = safeApiCall {
         api.placeOrder(
             PlaceOrderRequest(
@@ -27,6 +30,9 @@ class OrderRepository(private val api: ApiService) {
                 quantityLitres = quantityLitres,
                 deliveryAddressId = deliveryAddressId,
                 paymentMethod = paymentMethod,
+                scheduledAt = scheduledAt,
+                deliveryLatitude = latitude,
+                deliveryLongitude = longitude,
             ),
         )
     }

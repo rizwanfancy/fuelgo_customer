@@ -2,10 +2,12 @@ package pk.fuelgo.customer
 
 import android.content.Context
 import pk.fuelgo.customer.data.local.ApiConfigManager
+import pk.fuelgo.customer.data.local.ThemePreferenceManager
 import pk.fuelgo.customer.data.local.TokenManager
 import pk.fuelgo.customer.data.remote.NetworkModule
 import pk.fuelgo.customer.data.repository.AuthRepository
 import pk.fuelgo.customer.data.repository.CustomerRepository
+import pk.fuelgo.customer.data.repository.NotificationRepository
 import pk.fuelgo.customer.data.repository.OrderRepository
 
 /**
@@ -15,10 +17,12 @@ import pk.fuelgo.customer.data.repository.OrderRepository
  */
 class AppContainer(context: Context) {
     private val tokenManager = TokenManager(context.applicationContext)
+    val themePreferenceManager = ThemePreferenceManager(context.applicationContext)
     val apiConfigManager = ApiConfigManager(context.applicationContext)
     private val networkModule = NetworkModule(tokenManager, apiConfigManager)
 
     val authRepository = AuthRepository(networkModule.apiService, tokenManager, apiConfigManager)
     val customerRepository = CustomerRepository(networkModule.apiService)
     val orderRepository = OrderRepository(networkModule.apiService)
+    val notificationRepository = NotificationRepository(networkModule.apiService)
 }

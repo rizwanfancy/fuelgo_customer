@@ -14,6 +14,7 @@ import pk.fuelgo.customer.data.repository.CustomerRepository
 
 data class ProfileUiState(
     val isLoading: Boolean = true,
+    val isRefreshing: Boolean = false,
     val profile: CustomerProfileDto? = null,
     val errorMessage: String? = null,
     val loggedOut: Boolean = false,
@@ -36,12 +37,18 @@ class ProfileViewModel(
         load()
     }
 
-    fun load() {
+    fun refresh() {
+        val s = _uiState.value
+        if (s.isLoading || s.isRefreshing) return
+        load(silent = true)
+    }
+
+    fun load(silent: Boolean = false) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            _uiState.update { it.copy(isLoading = !silent, isRefreshing = silent, errorMessage = null) }
             when (val result = customerRepository.getProfile()) {
-                is ApiResult.Success -> _uiState.update { it.copy(isLoading = false, profile = result.data) }
-                is ApiResult.Error -> _uiState.update { it.copy(isLoading = false, errorMessage = result.message) }
+                is ApiResult.Success -> _uiState.update { it.copy(isLoading = false, isRefreshing = false, profile = result.data) }
+                is ApiResult.Error -> _uiState.update { it.copy(isLoading = false, isRefreshing = false, errorMessage = result.message) }
             }
         }
     }

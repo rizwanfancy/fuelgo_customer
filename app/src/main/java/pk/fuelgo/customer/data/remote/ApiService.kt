@@ -9,6 +9,7 @@ import pk.fuelgo.customer.data.remote.dto.CustomerAddressDto
 import pk.fuelgo.customer.data.remote.dto.CustomerProfileDto
 import pk.fuelgo.customer.data.remote.dto.FuelTypeDto
 import pk.fuelgo.customer.data.remote.dto.LoginRequest
+import pk.fuelgo.customer.data.remote.dto.NotificationDto
 import pk.fuelgo.customer.data.remote.dto.OrderDto
 import pk.fuelgo.customer.data.remote.dto.PlaceOrderRequest
 import pk.fuelgo.customer.data.remote.dto.RateOrderRequest
@@ -69,4 +70,14 @@ interface ApiService {
 
     @POST("orders/{id}/rate")
     suspend fun rateOrder(@Path("id") id: String, @Body body: RateOrderRequest): Response<ApiMessageDto>
+
+    // --- Notifications ----------------------------------------------------
+    @GET("notifications")
+    suspend fun getNotifications(): Response<List<NotificationDto>>
+
+    @PATCH("notifications/{id}/read")
+    suspend fun markNotificationRead(@Path("id") id: String): Response<Unit>
+
+    @PATCH("notifications/read-all")
+    suspend fun markAllNotificationsRead(): Response<Unit>
 }

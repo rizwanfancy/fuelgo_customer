@@ -29,12 +29,14 @@ import pk.fuelgo.customer.ui.components.FuelGoOutlinedButton
 import pk.fuelgo.customer.ui.components.FuelGoPrimaryButton
 import pk.fuelgo.customer.ui.components.FuelGoTextField
 import pk.fuelgo.customer.ui.components.LoadingState
+import pk.fuelgo.customer.ui.components.RefreshBox
+import pk.fuelgo.customer.ui.components.RefreshOnResume
 import pk.fuelgo.customer.ui.components.SectionCard
 import pk.fuelgo.customer.ui.components.AvatarCircle
 import pk.fuelgo.customer.ui.fuelGoViewModel
 
 @Composable
-fun ProfileScreen(onLoggedOut: () -> Unit) {
+fun ProfileScreen(onLoggedOut: () -> Unit, onOpenServerSettings: () -> Unit) {
     val viewModel = fuelGoViewModel { ProfileViewModel(it.customerRepository, it.authRepository) }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
@@ -42,6 +44,9 @@ fun ProfileScreen(onLoggedOut: () -> Unit) {
         if (state.loggedOut) onLoggedOut()
     }
 
+    RefreshOnResume(viewModel::refresh)
+
+    RefreshBox(isRefreshing = state.isRefreshing, onRefresh = viewModel::refresh) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -82,15 +87,18 @@ fun ProfileScreen(onLoggedOut: () -> Unit) {
                     }
                 }
             } else if (state.errorMessage != null) {
-                ErrorBanner(state.errorMessage.orEmpty())
+                ErrorBanner(state.errorMessage.orEmpty(), onRetry = { viewModel.load() })
             }
 
             SectionCard {
                 FuelGoOutlinedButton(text = "Change password", onClick = { viewModel.openChangePassword() }, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(10.dp))
+                FuelGoOutlinedButton(text = "Server settings", onClick = onOpenServerSettings, modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(10.dp))
                 FuelGoPrimaryButton(text = "Log Out", onClick = { viewModel.logout() }, modifier = Modifier.fillMaxWidth())
             }
         }
+    }
     }
 
     if (state.showChangePassword) {

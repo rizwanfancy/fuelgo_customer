@@ -29,6 +29,8 @@ private val INACTIVE_STATUSES = setOf("Delivered", "Cancelled", "Failed")
 
 data class TrackingUiState(
     val isLoading: Boolean = true,
+    val isRefreshing: Boolean = false,
+    val showCancelDialog: Boolean = false,
     val activeOrder: OrderDto? = null,
     val errorMessage: String? = null,
     val isCancelling: Boolean = false,
@@ -56,25 +58,37 @@ class TrackingViewModel(private val orderRepository: OrderRepository) : ViewMode
         }
     }
 
+    /** Pull-to-refresh: shows the indicator while reloading. */
     fun refreshNow() {
+        if (_uiState.value.isRefreshing) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isRefreshing = true) }
+            loadOnce()
+        }
+    }
+
+    fun retry() {
+        _uiState.update { it.copy(isLoading = true, errorMessage = null) }
         viewModelScope.launch { loadOnce() }
     }
+
+    fun setCancelDialog(show: Boolean) = _uiState.update { it.copy(showCancelDialog = show) }
 
     private suspend fun loadOnce() {
         when (val result = orderRepository.getMyOrders()) {
             is ApiResult.Success -> {
                 val active = result.data.firstOrNull { it.status !in INACTIVE_STATUSES }
-                _uiState.update { it.copy(isLoading = false, activeOrder = active, errorMessage = null) }
+                _uiState.update { it.copy(isLoading = false, isRefreshing = false, activeOrder = active, errorMessage = null) }
             }
-            is ApiResult.Error -> _uiState.update { it.copy(isLoading = false, errorMessage = result.message) }
+            is ApiResult.Error -> _uiState.update { it.copy(isLoading = false, isRefreshing = false, errorMessage = result.message) }
         }
     }
 
-    fun cancelActiveOrder() {
+    fun cancelActiveOrder(reason: String) {
         val order = _uiState.value.activeOrder ?: return
         viewModelScope.launch {
-            _uiState.update { it.copy(isCancelling = true) }
-            when (val result = orderRepository.cancelOrder(order.id, "Cancelled by customer")) {
+            _uiState.update { it.copy(isCancelling = true, showCancelDialog = false) }
+            when (val result = orderRepository.cancelOrder(order.id, reason)) {
                 is ApiResult.Success -> {
                     _uiState.update { it.copy(isCancelling = false, actionMessage = "Order cancelled.") }
                     loadOnce()

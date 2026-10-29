@@ -13,6 +13,10 @@ import pk.fuelgo.customer.data.remote.dto.CustomerAddressDto
 import pk.fuelgo.customer.data.remote.dto.FuelTypeDto
 import pk.fuelgo.customer.data.repository.CustomerRepository
 import pk.fuelgo.customer.data.repository.OrderRepository
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 
 val QUICK_QUANTITIES = listOf(20, 45, 100, 250, 500, 1000)
 
@@ -26,6 +30,12 @@ val PAYMENT_METHODS = listOf(
 
 data class OrderUiState(
     val isLoading: Boolean = true,
+    val isRefreshing: Boolean = false,
+    val fuelCategory: String = "all",
+    val scheduledAt: LocalDateTime? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val locationError: String? = null,
     val fuelTypes: List<FuelTypeDto> = emptyList(),
     val addresses: List<CustomerAddressDto> = emptyList(),
     val selectedFuelTypeId: String? = null,
@@ -39,12 +49,30 @@ data class OrderUiState(
     val isAddingAddress: Boolean = false,
     val addAddressError: String? = null,
 ) {
+    val visibleFuelTypes: List<FuelTypeDto>
+        get() = fuelTypes.filter { matchesCategory(it.code, fuelCategory) }
     val quantityLitres: Double get() = quantityText.toDoubleOrNull() ?: 0.0
     val selectedFuel: FuelTypeDto? get() = fuelTypes.find { it.id == selectedFuelTypeId }
     val fuelSubtotal: Double get() = (selectedFuel?.pricePerLitre ?: 0.0) * quantityLitres
     val total: Double get() = fuelSubtotal + AppConfig.DELIVERY_FEE_PKR
     val canSubmit: Boolean
         get() = !isSubmitting && selectedFuelTypeId != null && selectedAddressId != null && quantityLitres >= 5
+}
+
+val FUEL_CATEGORIES = listOf("all" to "All", "petrol" to "Petrol", "diesel" to "Diesel", "gas" to "Gas / Other")
+
+// Same grouping the web fuel-order screen uses.
+private val PETROL_CODES = setOf("MS", "HOBC")
+private val DIESEL_CODES = setOf("HSD")
+
+private fun matchesCategory(code: String, category: String): Boolean {
+    val c = code.uppercase()
+    return when (category) {
+        "petrol" -> c in PETROL_CODES
+        "diesel" -> c in DIESEL_CODES
+        "gas" -> c !in PETROL_CODES && c !in DIESEL_CODES
+        else -> true
+    }
 }
 
 class OrderViewModel(
@@ -59,9 +87,23 @@ class OrderViewModel(
         load()
     }
 
-    fun load() {
+    fun refresh() {
+        val s = _uiState.value
+        if (s.isLoading || s.isRefreshing || s.isSubmitting) return
+        load(silent = true)
+    }
+
+    fun setFuelCategory(category: String) = _uiState.update { it.copy(fuelCategory = category) }
+    fun setScheduledAt(value: LocalDateTime?) = _uiState.update { it.copy(scheduledAt = value, successMessage = null) }
+
+    fun setLocation(lat: Double, lng: Double) =
+        _uiState.update { it.copy(latitude = lat, longitude = lng, locationError = null) }
+    fun clearLocation() = _uiState.update { it.copy(latitude = null, longitude = null, locationError = null) }
+    fun setLocationError(message: String) = _uiState.update { it.copy(locationError = message) }
+
+    fun load(silent: Boolean = false) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            _uiState.update { it.copy(isLoading = !silent, isRefreshing = silent, errorMessage = null) }
 
             val fuelResult = orderRepository.getFuelTypes()
             val addressResult = customerRepository.getAddresses()
@@ -78,6 +120,7 @@ class OrderViewModel(
             _uiState.update {
                 it.copy(
                     isLoading = false,
+                    isRefreshing = false,
                     fuelTypes = fuelTypes,
                     addresses = addresses,
                     selectedFuelTypeId = it.selectedFuelTypeId ?: fuelTypes.firstOrNull()?.id,
@@ -163,6 +206,11 @@ class OrderViewModel(
             _uiState.update { it.copy(errorMessage = "Minimum order quantity is 5 litres.") }
             return
         }
+        val scheduled = s.scheduledAt
+        if (scheduled != null && !scheduled.isAfter(LocalDateTime.now().plusMinutes(30))) {
+            _uiState.update { it.copy(errorMessage = "Scheduled time must be at least 30 minutes from now.") }
+            return
+        }
 
         viewModelScope.launch {
             _uiState.update { it.copy(isSubmitting = true, errorMessage = null, successMessage = null) }
@@ -172,11 +220,16 @@ class OrderViewModel(
                     quantityLitres = s.quantityLitres,
                     deliveryAddressId = addressId,
                     paymentMethod = s.paymentMethod,
+                    scheduledAt = scheduled?.atZone(ZoneId.systemDefault())?.withZoneSameInstant(ZoneOffset.UTC)
+                        ?.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
+                    latitude = s.latitude,
+                    longitude = s.longitude,
                 )
             ) {
                 is ApiResult.Success -> _uiState.update {
                     it.copy(
                         isSubmitting = false,
+                        scheduledAt = null,
                         successMessage = "Order placed! Order #${result.data.orderNumber}. Track it from the Tracking tab.",
                     )
                 }

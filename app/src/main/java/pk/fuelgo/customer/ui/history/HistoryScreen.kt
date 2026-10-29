@@ -1,6 +1,25 @@
 package pk.fuelgo.customer.ui.history
 
 import androidx.compose.foundation.background
+import android.content.Context
+import android.content.Intent
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DateRangePicker
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.rememberDateRangePickerState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import pk.fuelgo.customer.ui.components.CancelOrderDialog
+import pk.fuelgo.customer.ui.components.ErrorBanner
+import pk.fuelgo.customer.ui.components.RefreshBox
+import pk.fuelgo.customer.ui.components.RefreshOnResume
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -49,83 +68,157 @@ import java.util.Locale
 private val pkrFormat = NumberFormat.getNumberInstance(Locale("en", "PK")).apply { maximumFractionDigits = 0 }
 private fun pkr(amount: Double) = "PKR ${pkrFormat.format(amount)}"
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HistoryScreen(onGoToOrder: () -> Unit) {
     val viewModel = fuelGoViewModel { HistoryViewModel(it.orderRepository) }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    var showDatePicker by remember { mutableStateOf(false) }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                "All your fuel orders, receipts, and payment history.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+    RefreshOnResume(viewModel::refresh)
 
-        if (state.isLoading) {
-            LoadingState("Loading your orders…")
-            return@Column
-        }
-
-        if (state.orders.isEmpty()) {
-            EmptyState(
-                title = "No orders yet",
-                message = "Place your first fuel order to see it here.",
-                actionLabel = "Order fuel now",
-                onAction = onGoToOrder,
-            )
-            return@Column
-        }
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            StatsRow(state.stats)
-
-            OutlinedTextField(
-                value = state.searchQuery,
-                onValueChange = viewModel::setSearchQuery,
-                placeholder = { Text("Search by order #, fuel type, address…") },
-                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(ORDER_STATUS_FILTERS) { statusOption ->
-                    PillChip(
-                        text = statusOption,
-                        selected = state.statusFilter == statusOption,
-                        onClick = { viewModel.setStatusFilter(statusOption) },
+    RefreshBox(isRefreshing = state.isRefreshing, onRefresh = viewModel::refresh) {
+        when {
+            state.isLoading -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                LoadingState("Loading your orders…")
+            }
+            state.orders.isEmpty() -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                state.errorMessage?.let { ErrorBanner(it, modifier = Modifier.padding(16.dp), onRetry = { viewModel.load() }) }
+                EmptyState(
+                    title = "No orders yet",
+                    message = "Place your first fuel order to see it here.",
+                    actionLabel = "Order fuel now",
+                    onAction = onGoToOrder,
+                )
+            }
+            else -> LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                item {
+                    Text(
+                        "All your fuel orders, receipts, and payment history.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-            }
-
-            if (state.filteredOrders.isEmpty()) {
-                EmptyState(title = "No results", message = "Try adjusting your search or filter.")
-            } else {
-                state.filteredOrders.forEach { order ->
-                    OrderRow(
-                        order = order,
-                        isCancelling = state.cancellingOrderId == order.id,
-                        onClick = { viewModel.openReceipt(order) },
-                        onRate = { viewModel.openRating(order) },
-                        onCancel = { viewModel.cancelOrder(order) },
+                state.errorMessage?.let { msg -> item { ErrorBanner(msg, onRetry = { viewModel.load() }) } }
+                item { StatsRow(state.stats) }
+                item {
+                    OutlinedTextField(
+                        value = state.searchQuery,
+                        onValueChange = viewModel::setSearchQuery,
+                        placeholder = { Text("Search by order #, fuel type, address…") },
+                        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
+                item {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(ORDER_STATUS_FILTERS) { statusOption ->
+                            PillChip(
+                                text = statusOption,
+                                selected = state.statusFilter == statusOption,
+                                onClick = { viewModel.setStatusFilter(statusOption) },
+                            )
+                        }
+                    }
+                }
+                if (state.fuelOptions.size > 2) {
+                    item {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(state.fuelOptions) { fuel ->
+                                PillChip(
+                                    text = fuel,
+                                    selected = state.fuelFilter == fuel,
+                                    onClick = { viewModel.setFuelFilter(fuel) },
+                                )
+                            }
+                        }
+                    }
+                }
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        FuelGoOutlinedButton(
+                            text = dateRangeLabel(state.dateFrom, state.dateTo),
+                            onClick = { showDatePicker = true },
+                        )
+                        FuelGoOutlinedButton(
+                            text = "Export",
+                            onClick = { shareText(context, "FuelGo orders", ordersCsv(state.filteredOrders)) },
+                            enabled = state.filteredOrders.isNotEmpty(),
+                        )
+                        if (state.hasActiveFilters) {
+                            TextButton(onClick = viewModel::clearFilters) { Text("Clear") }
+                        }
+                    }
+                }
+                item {
+                    Text(
+                        "${state.filteredOrders.size} of ${state.orders.size} orders",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (state.filteredOrders.isEmpty()) {
+                    item { EmptyState(title = "No results", message = "Try adjusting your search or filters.") }
+                } else {
+                    items(state.filteredOrders, key = { it.id }) { order ->
+                        OrderRow(
+                            order = order,
+                            isCancelling = state.cancellingOrderId == order.id,
+                            onClick = { viewModel.openReceipt(order) },
+                            onRate = { viewModel.openRating(order) },
+                            onCancel = { viewModel.askCancel(order) },
+                        )
+                    }
+                }
+                item { Spacer(Modifier.height(24.dp)) }
             }
-
-            Spacer(Modifier.height(24.dp))
         }
     }
 
     state.selectedOrder?.let { order ->
-        ReceiptDialog(order = order, onDismiss = { viewModel.closeReceipt() })
+        ReceiptDialog(
+            order = order,
+            onDismiss = { viewModel.closeReceipt() },
+            onShare = { shareText(context, "Receipt ${order.orderNumber}", receiptText(order)) },
+        )
+    }
+
+    state.cancelTarget?.let { target ->
+        CancelOrderDialog(
+            orderNumber = target.orderNumber,
+            onDismiss = { viewModel.askCancel(null) },
+            onConfirm = { reason -> viewModel.cancelOrder(target, reason) },
+        )
+    }
+
+    if (showDatePicker) {
+        val pickerState = rememberDateRangePickerState()
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.setDateRange(
+                        pickerState.selectedStartDateMillis?.let(::millisToLocalDate),
+                        pickerState.selectedEndDateMillis?.let(::millisToLocalDate),
+                    )
+                    showDatePicker = false
+                }) { Text("Apply") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    viewModel.setDateRange(null, null)
+                    showDatePicker = false
+                }) { Text("Clear") }
+            },
+        ) {
+            DateRangePicker(state = pickerState, modifier = Modifier.height(500.dp))
+        }
     }
 
     state.ratingOrder?.let { ratingOrder ->
@@ -140,6 +233,49 @@ fun HistoryScreen(onGoToOrder: () -> Unit) {
             onSubmit = { viewModel.submitRating() },
         )
     }
+}
+
+// DatePicker returns UTC-midnight millis, so convert in UTC to keep the picked calendar day.
+private fun millisToLocalDate(millis: Long): LocalDate =
+    Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
+
+private fun dateRangeLabel(from: LocalDate?, to: LocalDate?): String = when {
+    from == null && to == null -> "Date range"
+    to == null -> "From $from"
+    else -> "$from → $to"
+}
+
+private fun receiptText(order: OrderDto): String = buildString {
+    appendLine("FuelGo receipt ${order.orderNumber}")
+    appendLine("Fuel: ${order.fuelTypeName} x ${order.quantityLitres.toInt()} L @ ${pkr(order.pricePerLitre)}")
+    appendLine("Payment: ${order.paymentMethod}")
+    appendLine("Status: ${order.status}")
+    appendLine("Address: ${order.deliveryAddress}, ${order.deliveryCity}")
+    order.driverName?.takeIf { it.isNotBlank() }?.let { appendLine("Driver: $it") }
+    order.deliveredAt?.takeIf { it.isNotBlank() }?.let { appendLine("Delivered: ${it.take(16).replace("T", " ")}") }
+    append("Total: ${pkr(order.totalAmount)}")
+}
+
+private fun ordersCsv(orders: List<OrderDto>): String {
+    fun cell(v: String) = "\"" + v.replace("\"", "\"\"") + "\""
+    val header = "Order,Date,Fuel,Litres,Total,Payment,Status,Address"
+    val rows = orders.map {
+        listOf(
+            it.orderNumber, it.createdAt?.take(10) ?: "", it.fuelTypeName, it.quantityLitres.toInt().toString(),
+            it.totalAmount.toInt().toString(), it.paymentMethod, it.status, "${it.deliveryAddress}, ${it.deliveryCity}",
+        ).joinToString(",") { c -> cell(c) }
+    }
+    return (listOf(header) + rows).joinToString("\n")
+}
+
+// ponytail: shares plain text; a real PDF export needs PdfDocument + FileProvider, add if text isn't enough.
+private fun shareText(context: Context, subject: String, text: String) {
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_SUBJECT, subject)
+        putExtra(Intent.EXTRA_TEXT, text)
+    }
+    context.startActivity(Intent.createChooser(intent, subject))
 }
 
 @Composable
@@ -207,7 +343,7 @@ private fun OrderRow(
 }
 
 @Composable
-private fun ReceiptDialog(order: OrderDto, onDismiss: () -> Unit) {
+private fun ReceiptDialog(order: OrderDto, onDismiss: () -> Unit, onShare: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Receipt — ${order.orderNumber}") },
@@ -226,6 +362,7 @@ private fun ReceiptDialog(order: OrderDto, onDismiss: () -> Unit) {
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+        dismissButton = { TextButton(onClick = onShare) { Text("Share receipt") } },
     )
 }
 

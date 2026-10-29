@@ -48,6 +48,9 @@ import pk.fuelgo.customer.ui.components.ErrorBanner
 import pk.fuelgo.customer.ui.components.FuelGoOutlinedButton
 import pk.fuelgo.customer.ui.components.FuelGoPrimaryButton
 import pk.fuelgo.customer.ui.components.LoadingState
+import pk.fuelgo.customer.ui.components.PillChip
+import pk.fuelgo.customer.ui.components.RefreshBox
+import pk.fuelgo.customer.ui.components.RefreshOnResume
 import pk.fuelgo.customer.ui.components.SectionCard
 import pk.fuelgo.customer.ui.components.SuccessBanner
 import pk.fuelgo.customer.ui.fuelGoViewModel
@@ -65,11 +68,9 @@ fun OrderScreen() {
     val viewModel = fuelGoViewModel { OrderViewModel(it.orderRepository, it.customerRepository) }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
-    if (state.isLoading) {
-        LoadingState("Loading fuel types and prices…", modifier = Modifier.fillMaxSize())
-        return
-    }
+    RefreshOnResume(viewModel::refresh)
 
+    RefreshBox(isRefreshing = state.isRefreshing, onRefresh = viewModel::refresh) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -77,6 +78,10 @@ fun OrderScreen() {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
+        if (state.isLoading) {
+            LoadingState("Loading fuel types and prices…")
+            return@Column
+        }
         Text(
             "Select fuel type, quantity, address, and payment method.",
             style = MaterialTheme.typography.bodyMedium,
@@ -85,11 +90,16 @@ fun OrderScreen() {
 
         SectionCard {
             Text("1. Fuel type", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 12.dp))
-            if (state.fuelTypes.isEmpty()) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 12.dp)) {
+                items(FUEL_CATEGORIES) { (value, label) ->
+                    PillChip(label, selected = state.fuelCategory == value, onClick = { viewModel.setFuelCategory(value) })
+                }
+            }
+            if (state.visibleFuelTypes.isEmpty()) {
                 Text("No fuel types available right now.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(state.fuelTypes, key = { it.id }) { fuel ->
+                    items(state.visibleFuelTypes, key = { it.id }) { fuel ->
                         FuelTypeCard(
                             fuel = fuel,
                             selected = fuel.id == state.selectedFuelTypeId,
@@ -125,6 +135,8 @@ fun OrderScreen() {
             )
         }
 
+        DeliveryTimingCard(scheduledAt = state.scheduledAt, onChange = viewModel::setScheduledAt)
+
         SectionCard {
             Text("3. Delivery address", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 12.dp))
             if (state.addresses.isEmpty()) {
@@ -154,6 +166,15 @@ fun OrderScreen() {
             )
         }
 
+        DeliveryLocationCard(
+            latitude = state.latitude,
+            longitude = state.longitude,
+            error = state.locationError,
+            onLocation = viewModel::setLocation,
+            onClear = viewModel::clearLocation,
+            onError = viewModel::setLocationError,
+        )
+
         SectionCard {
             Text("4. Payment method", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 8.dp))
             Column {
@@ -181,6 +202,7 @@ fun OrderScreen() {
             SummaryLine("Unit price", pkr(state.selectedFuel?.pricePerLitre ?: 0.0))
             SummaryLine("Fuel subtotal", pkr(state.fuelSubtotal))
             SummaryLine("Delivery fee", pkr(AppConfig.DELIVERY_FEE_PKR.toDouble()))
+            SummaryLine("Timing", state.scheduledAt?.format(java.time.format.DateTimeFormatter.ofPattern("d MMM, hh:mm a")) ?: "Deliver now")
             Spacer(Modifier.height(8.dp))
             Row(
                 modifier = Modifier
@@ -194,7 +216,7 @@ fun OrderScreen() {
             }
 
             Spacer(Modifier.height(12.dp))
-            state.errorMessage?.let { ErrorBanner(it, modifier = Modifier.padding(bottom = 8.dp)) }
+            state.errorMessage?.let { ErrorBanner(it, modifier = Modifier.padding(bottom = 8.dp), onRetry = { viewModel.load() }) }
             state.successMessage?.let { SuccessBanner(it, modifier = Modifier.padding(bottom = 8.dp)) }
 
             FuelGoPrimaryButton(
@@ -205,6 +227,7 @@ fun OrderScreen() {
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
             )
         }
+    }
     }
 
     if (state.showAddAddressDialog) {
