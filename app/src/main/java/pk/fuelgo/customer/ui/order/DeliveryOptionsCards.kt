@@ -5,7 +5,11 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import android.location.Location
+import android.location.LocationListener
 import android.location.LocationManager
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -33,8 +37,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import androidx.core.location.LocationManagerCompat
-import androidx.core.util.Consumer
 import pk.fuelgo.customer.ui.components.FuelGoOutlinedButton
 import pk.fuelgo.customer.ui.components.PillChip
 import pk.fuelgo.customer.ui.components.SectionCard
@@ -149,6 +151,8 @@ fun DeliveryLocationCard(
     }
 }
 
+private const val LOCATION_TIMEOUT_MS = 15_000L
+
 @SuppressLint("MissingPermission") // Caller checks ACCESS_FINE_LOCATION before invoking.
 private fun fetchLocation(context: Context, onLocation: (Double, Double) -> Unit, onError: (String) -> Unit) {
     val manager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
@@ -159,7 +163,38 @@ private fun fetchLocation(context: Context, onLocation: (Double, Double) -> Unit
         onError("Turn on location services and try again.")
         return
     }
-    LocationManagerCompat.getCurrentLocation(manager, provider, null, ContextCompat.getMainExecutor(context), Consumer<Location?> { location ->
-        if (location != null) onLocation(location.latitude, location.longitude) else onError("Couldn't get your location. Try again outdoors.")
-    })
+
+    // A recent cached fix is good enough for a delivery pin.
+    manager.getLastKnownLocation(provider)?.let {
+        onLocation(it.latitude, it.longitude)
+        return
+    }
+
+    val handler = Handler(Looper.getMainLooper())
+    var finished = false
+    lateinit var listener: LocationListener
+    val timeout = Runnable {
+        if (!finished) {
+            finished = true
+            manager.removeUpdates(listener)
+            onError("Couldn't get your location. Try again outdoors.")
+        }
+    }
+    // All four callbacks are implemented because API 26-29 has no default methods on this interface.
+    listener = object : LocationListener {
+        override fun onLocationChanged(location: Location) {
+            if (finished) return
+            finished = true
+            handler.removeCallbacks(timeout)
+            manager.removeUpdates(this)
+            onLocation(location.latitude, location.longitude)
+        }
+
+        @Deprecated("Deprecated in Java")
+        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
+        override fun onProviderEnabled(provider: String) = Unit
+        override fun onProviderDisabled(provider: String) = Unit
+    }
+    manager.requestLocationUpdates(provider, 0L, 0f, listener, Looper.getMainLooper())
+    handler.postDelayed(timeout, LOCATION_TIMEOUT_MS)
 }
